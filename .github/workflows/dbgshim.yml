@@ -57,8 +57,19 @@ jobs:
           sudo mkdir -p /opt/loongson
           sudo tar -xf /tmp/loongson.tar.xz -C /opt/loongson --strip-components=1
           echo "/opt/loongson/bin" >> $GITHUB_PATH
-          # Loongson tarball's sysroot lives at <prefix>/target (has usr/lib64/crt1.o etc).
-          # Point dotnet-diagnostics' cross toolchain.cmake at it via ROOTFS_DIR.
+
+          # Bridge triplet mismatch + debian-style layout expected by
+          # dotnet-diagnostics' toolchain.cmake. Loongson ships
+          # "loongarch64-unknown-linux-gnu"; toolchain.cmake expects
+          # "loongarch64-linux-gnu" and a sysroot laid out debian-style
+          # (<root>/usr/lib/gcc/<triple>/<ver>, <root>/usr/lib/<triple>).
+          sudo ln -sfn loongarch64-unknown-linux-gnu /opt/loongson/lib/gcc/loongarch64-linux-gnu
+          sudo mkdir -p /opt/loongson/target/usr/lib
+          sudo ln -sfn /opt/loongson/lib/gcc /opt/loongson/target/usr/lib/gcc
+          sudo ln -sfn /opt/loongson/loongarch64-unknown-linux-gnu/lib /opt/loongson/target/usr/lib/loongarch64-linux-gnu
+          sudo mkdir -p /opt/loongson/target/lib
+          sudo ln -sfn /opt/loongson/loongarch64-unknown-linux-gnu/lib /opt/loongson/target/lib/loongarch64-linux-gnu
+
           echo "ROOTFS_DIR=/opt/loongson/target" >> $GITHUB_ENV
 
       - name: Build rootfs (debian-based archs)
