@@ -152,11 +152,19 @@ jobs:
           readelf -d "$SO" | grep -E 'NEEDED|SONAME|RUNPATH'
           echo
           echo "=== Exported dbgshim symbols ==="
-          readelf --dyn-syms "$SO" | awk '$7 == "GLOBAL" || $7 == "WEAK"' | grep -E 'CreateProcessForLaunch|CloseCLREnumeration|EnumerateCLRs|RegisterForRuntimeStartup|GetStartupNotificationEvent|UnregisterForRuntimeStartup' || {
-              echo "::error::expected dbgshim exports not found in $SO"
-              exit 1
-          }
-          echo "OK: libdbgshim.so is '$MACHINE' with expected exports."
+          # Defined symbols are ones with a non-UND section index in field 7.
+          readelf --dyn-syms "$SO" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") { print $8 }' > /tmp/exports.txt
+          cat /tmp/exports.txt
+          echo
+          MISSING=0
+          for sym in CreateProcessForLaunch CloseCLREnumeration EnumerateCLRs RegisterForRuntimeStartup GetStartupNotificationEvent UnregisterForRuntimeStartup; do
+              if ! grep -q "^${sym}\$" /tmp/exports.txt; then
+                  echo "::error::export '$sym' missing from $SO"
+                  MISSING=1
+              fi
+          done
+          [ "$MISSING" = "0" ] || exit 1
+          echo "OK: libdbgshim.so is '$MACHINE' with all expected dbgshim exports."
 
       - uses: actions/upload-artifact@v4
         with:
