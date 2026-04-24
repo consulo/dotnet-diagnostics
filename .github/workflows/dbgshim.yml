@@ -99,13 +99,18 @@ jobs:
       - name: Prune src/CMakeLists to only dbgshim
         run: |
           # We only need libdbgshim.so. Drop SOS and tests:
-          #   - SOS re-includes shared.cmake which re-declares eventing_headers
-          #     (already created by src/shared/) -> cmake duplicate-target error.
-          #   - SOS's lldbplugin also needs lldb-dev which isn't in our sysroots.
+          #   - SOS's lldbplugin needs lldb-dev which isn't in our sysroots.
           #   - tests require a host runtime and aren't useful for cross builds.
           sed -i '/add_subdirectory(SOS)/d;/add_subdirectory(tests)/d' src/CMakeLists.txt
           echo "=== patched src/CMakeLists.txt ==="
           cat src/CMakeLists.txt
+
+          # dbgshim/CMakeLists.txt directly includes shared.cmake a second time
+          # (shared/ already created eventing_headers as a dummy target). Guard
+          # the add_custom_target so the second include is a no-op.
+          sed -i 's|^    add_custom_target(eventing_headers).*$|    if(NOT TARGET eventing_headers)\n        add_custom_target(eventing_headers)\n    endif()|' src/shared/clrdefinitions.cmake
+          echo "=== patched clrdefinitions.cmake (eventing_headers block) ==="
+          grep -n -B1 -A5 'eventing_headers' src/shared/clrdefinitions.cmake | head -20
 
       - name: Build native (host)
         if: ${{ !matrix.cross }}
