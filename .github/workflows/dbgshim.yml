@@ -47,16 +47,26 @@ jobs:
             debootstrap qemu-user-static binfmt-support \
             debian-archive-keyring debian-ports-archive-keyring
 
+      - name: Refresh debian-ports keyring (loongarch64)
+        if: matrix.arch == 'loongarch64'
+        run: |
+          # Ubuntu's debian-ports-archive-keyring package lags the current
+          # debian-ports signing key. Import the live key (the one signing
+          # the current sid InRelease file) into both keyrings that debootstrap
+          # consults.
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/debian-ports-archive-keyring.gpg \
+            --keyserver hkps://keyserver.ubuntu.com \
+            --recv-keys 5FFACC4B97F15BF3636639EBC6894E6BB25B9C99
+          sudo gpg --no-default-keyring \
+            --keyring /usr/share/keyrings/debian-archive-keyring.gpg \
+            --keyserver hkps://keyserver.ubuntu.com \
+            --recv-keys 5FFACC4B97F15BF3636639EBC6894E6BB25B9C99
+
       - name: Build rootfs
         if: matrix.cross
         run: |
-          EXTRA=""
-          if [ "${{ matrix.arch }}" = "loongarch64" ]; then
-              # debian-ports rotates signing keys faster than Ubuntu's
-              # debian-ports-archive-keyring package updates.
-              EXTRA="--skipsigcheck"
-          fi
-          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount $EXTRA
+          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
 
       - name: Build native (host)
         if: ${{ !matrix.cross }}
