@@ -50,7 +50,13 @@ jobs:
       - name: Build rootfs
         if: matrix.cross
         run: |
-          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
+          EXTRA=""
+          if [ "${{ matrix.arch }}" = "loongarch64" ]; then
+              # debian-ports rotates signing keys faster than Ubuntu's
+              # debian-ports-archive-keyring package updates.
+              EXTRA="--skipsigcheck"
+          fi
+          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount $EXTRA
 
       - name: Build native (host)
         if: ${{ !matrix.cross }}
