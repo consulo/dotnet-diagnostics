@@ -47,24 +47,22 @@ jobs:
             debootstrap qemu-user-static binfmt-support \
             debian-archive-keyring debian-ports-archive-keyring
 
-      - name: Refresh debian-ports keyring (loongarch64)
+      - name: Install Loongson toolchain (loongarch64)
         if: matrix.arch == 'loongarch64'
         run: |
-          # Ubuntu's debian-ports-archive-keyring package lags the current
-          # debian-ports signing key. Import the live key (the one signing
-          # the current sid InRelease file) into both keyrings that debootstrap
-          # consults.
-          sudo gpg --no-default-keyring \
-            --keyring /usr/share/keyrings/debian-ports-archive-keyring.gpg \
-            --keyserver hkps://keyserver.ubuntu.com \
-            --recv-keys 5FFACC4B97F15BF3636639EBC6894E6BB25B9C99
-          sudo gpg --no-default-keyring \
-            --keyring /usr/share/keyrings/debian-archive-keyring.gpg \
-            --keyserver hkps://keyserver.ubuntu.com \
-            --recv-keys 5FFACC4B97F15BF3636639EBC6894E6BB25B9C99
+          # Same prebuilt toolchain consulo/Loader uses. Avoids the
+          # debian-ports / debootstrap keyring churn entirely.
+          URL="https://github.com/loongson/build-tools/releases/download/2024.08.08/x86_64-cross-tools-loongarch64-binutils_2.43-gcc_14.2.0-glibc_2.40.tar.xz"
+          wget -q "$URL" -O /tmp/loongson.tar.xz
+          sudo mkdir -p /opt/loongson
+          sudo tar -xf /tmp/loongson.tar.xz -C /opt/loongson --strip-components=1
+          echo "/opt/loongson/bin" >> $GITHUB_PATH
+          # Loongson tarball's sysroot lives at <prefix>/target (has usr/lib64/crt1.o etc).
+          # Point dotnet-diagnostics' cross toolchain.cmake at it via ROOTFS_DIR.
+          echo "ROOTFS_DIR=/opt/loongson/target" >> $GITHUB_ENV
 
-      - name: Build rootfs
-        if: matrix.cross
+      - name: Build rootfs (debian-based archs)
+        if: matrix.cross && matrix.arch != 'loongarch64'
         run: |
           sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
 
