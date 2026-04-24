@@ -68,11 +68,11 @@ jobs:
 
       - name: Build native (host)
         if: ${{ !matrix.cross }}
-        run: ./build.sh -arch ${{ matrix.arch }} -configuration Release -skipmanaged
+        run: ./build.sh -a ${{ matrix.arch }} -configuration Release -skipmanaged
 
       - name: Build native (cross)
         if: matrix.cross
-        run: ./build.sh -arch ${{ matrix.arch }} -cross -configuration Release -skipmanaged
+        run: ./build.sh -a ${{ matrix.arch }} -cross -configuration Release -skipmanaged
 
       - name: Locate libdbgshim.so
         run: |
