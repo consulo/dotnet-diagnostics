@@ -112,13 +112,13 @@ jobs:
           echo "=== patched clrdefinitions.cmake (eventing_headers block) ==="
           grep -n -B1 -A5 'eventing_headers' src/shared/clrdefinitions.cmake | head -20
 
-      - name: Build native (host)
-        if: ${{ !matrix.cross }}
-        run: ./build.sh -a ${{ matrix.arch }} -configuration Release -skipmanaged
-
-      - name: Build native (cross)
-        if: matrix.cross
-        run: ./build.sh -a ${{ matrix.arch }} -cross -configuration Release -skipmanaged -cmakeargs "-DFEATURE_EVENT_TRACE=OFF"
+      - name: Build native
+        run: |
+          CROSS_FLAG=""
+          if [ "${{ matrix.cross }}" = "true" ]; then
+              CROSS_FLAG="-cross"
+          fi
+          ./build.sh -a ${{ matrix.arch }} $CROSS_FLAG -configuration Release -skipmanaged -cmakeargs "-DFEATURE_EVENT_TRACE=OFF"
 
       - name: Locate libdbgshim.so
         run: |
@@ -152,8 +152,11 @@ jobs:
           readelf -d "$SO" | grep -E 'NEEDED|SONAME|RUNPATH'
           echo
           echo "=== Exported dbgshim symbols ==="
-          # Defined symbols are ones with a non-UND section index in field 7.
-          readelf --dyn-syms "$SO" | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") { print $8 }' > /tmp/exports.txt
+          # -W: do not truncate long names. Names may have a @@VERSION suffix
+          # (versioned symbols); strip it before matching.
+          readelf -W --dyn-syms "$SO" \
+            | awk '$7 != "UND" && ($5 == "GLOBAL" || $5 == "WEAK") { sub(/@@?.*/, "", $8); print $8 }' \
+            | sort -u > /tmp/exports.txt
           cat /tmp/exports.txt
           echo
           MISSING=0
