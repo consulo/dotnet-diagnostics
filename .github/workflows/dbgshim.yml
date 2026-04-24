@@ -94,7 +94,9 @@ jobs:
       - name: Build rootfs (debian-based archs)
         if: matrix.cross && matrix.arch != 'loongarch64'
         run: |
-          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
+          # no-lldb: skip lldb-dev in the rootfs (default is liblldb-3.9-dev
+          # which isn't in noble). We prune SOS/lldbplugin out anyway.
+          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} no-lldb --skipunmount
 
       - name: Prune src/CMakeLists to only dbgshim
         run: |
