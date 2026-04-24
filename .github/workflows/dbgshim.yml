@@ -50,18 +50,17 @@ jobs:
       - name: Install Loongson toolchain (loongarch64)
         if: matrix.arch == 'loongarch64'
         run: |
-          # Same prebuilt toolchain consulo/Loader uses. Avoids the
-          # debian-ports / debootstrap keyring churn entirely.
+          set -euo pipefail
+          # 1. Cross toolchain (gcc + binutils + glibc 2.40) — same one consulo/Loader uses.
           URL="https://github.com/loongson/build-tools/releases/download/2024.08.08/x86_64-cross-tools-loongarch64-binutils_2.43-gcc_14.2.0-glibc_2.40.tar.xz"
           wget -q "$URL" -O /tmp/loongson.tar.xz
           sudo mkdir -p /opt/loongson
           sudo tar -xf /tmp/loongson.tar.xz -C /opt/loongson --strip-components=1
           echo "/opt/loongson/bin" >> $GITHUB_PATH
 
-          # Bridge triplet mismatch + debian-style layout expected by
-          # dotnet-diagnostics' toolchain.cmake. Loongson ships
-          # "loongarch64-unknown-linux-gnu"; toolchain.cmake expects
-          # "loongarch64-linux-gnu" and a sysroot laid out debian-style
+          # 2. Bridge triplet + layout mismatch.
+          # Loongson ships "loongarch64-unknown-linux-gnu"; toolchain.cmake
+          # expects "loongarch64-linux-gnu" with debian-style layout
           # (<root>/usr/lib/gcc/<triple>/<ver>, <root>/usr/lib/<triple>).
           sudo ln -sfn loongarch64-unknown-linux-gnu /opt/loongson/lib/gcc/loongarch64-linux-gnu
           sudo mkdir -p /opt/loongson/target/usr/lib
@@ -69,6 +68,26 @@ jobs:
           sudo ln -sfn /opt/loongson/loongarch64-unknown-linux-gnu/lib /opt/loongson/target/usr/lib/loongarch64-linux-gnu
           sudo mkdir -p /opt/loongson/target/lib
           sudo ln -sfn /opt/loongson/loongarch64-unknown-linux-gnu/lib /opt/loongson/target/lib/loongarch64-linux-gnu
+
+          # 3. Extract debian-ports -dev packages dbgshim's PAL needs
+          # (libunwind, libicu). Download raw .deb — bypasses debootstrap's
+          # keyring verification entirely, which avoids the debian-ports
+          # signing-key rotation issue.
+          DPORTS=http://ftp.ports.debian.org/debian-ports/pool/main
+          fetch_deb() {
+              local url="$1"
+              local deb=/tmp/pkg.deb
+              wget -q "$url" -O "$deb"
+              local tmp=/tmp/deb-extract
+              rm -rf "$tmp"; mkdir -p "$tmp"
+              (cd "$tmp" && ar x "$deb" && sudo tar -xf data.tar.* -C /opt/loongson/target)
+              rm -rf "$tmp" "$deb"
+          }
+          # Versions tracked against debian-ports sid snapshot. Update as needed.
+          fetch_deb "$DPORTS/libu/libunwind/libunwind-dev_1.8.2-2_loong64.deb" || \
+              fetch_deb "$DPORTS/libu/libunwind/libunwind-dev_1.8.1-1.1_loong64.deb"
+          fetch_deb "$DPORTS/libu/libunwind/libunwind8_1.8.2-2_loong64.deb" || \
+              fetch_deb "$DPORTS/libu/libunwind/libunwind8_1.8.1-1.1_loong64.deb"
 
           echo "ROOTFS_DIR=/opt/loongson/target" >> $GITHUB_ENV
 
@@ -83,7 +102,7 @@ jobs:
 
       - name: Build native (cross)
         if: matrix.cross
-        run: ./build.sh -a ${{ matrix.arch }} -cross -configuration Release -skipmanaged
+        run: ./build.sh -a ${{ matrix.arch }} -cross -configuration Release -skipmanaged -cmakeargs "-DFEATURE_EVENT_TRACE=OFF"
 
       - name: Locate libdbgshim.so
         run: |
