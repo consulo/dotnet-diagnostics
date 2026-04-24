@@ -1,0 +1,129 @@
+name: dbgshim
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            out_dir: linux-x86_64
+            elf_machine: Advanced Micro Devices X86-64
+            cross: false
+          - arch: arm64
+            out_dir: linux-aarch64
+            elf_machine: AArch64
+            codename: noble
+            cross: true
+          - arch: loongarch64
+            out_dir: linux-loongarch64
+            elf_machine: LoongArch
+            codename: sid
+            cross: true
+          - arch: riscv64
+            out_dir: linux-riscv64
+            elf_machine: RISC-V
+            codename: noble
+            cross: true
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake clang make python3 \
+            debootstrap qemu-user-static binfmt-support
+
+      - name: Build rootfs
+        if: matrix.cross
+        run: |
+          sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
+
+      - name: Build native (host)
+        if: ${{ !matrix.cross }}
+        run: ./build.sh -arch ${{ matrix.arch }} -configuration Release -skipmanaged
+
+      - name: Build native (cross)
+        if: matrix.cross
+        run: ./build.sh -arch ${{ matrix.arch }} -cross -configuration Release -skipmanaged
+
+      - name: Locate libdbgshim.so
+        run: |
+          set -euo pipefail
+          echo "=== all libdbgshim.so files ==="
+          find artifacts -name libdbgshim.so
+          BIN=$(find artifacts -name libdbgshim.so -type f | head -1)
+          if [ -z "$BIN" ]; then
+              echo "::error::libdbgshim.so not produced"
+              exit 1
+          fi
+          mkdir -p out/${{ matrix.out_dir }}
+          cp "$BIN" out/${{ matrix.out_dir }}/libdbgshim.so
+
+      - name: Verify ELF architecture
+        run: |
+          set -euo pipefail
+          SO=out/${{ matrix.out_dir }}/libdbgshim.so
+          echo "File: $SO"
+          readelf -h "$SO" | grep -E "Class|Machine"
+          MACHINE=$(readelf -h "$SO" | awk -F: '/Machine:/ {sub(/^[ \t]+/,"",$2); print $2}')
+          if [ "$MACHINE" != "${{ matrix.elf_machine }}" ]; then
+              echo "::error::ELF machine mismatch. Expected '${{ matrix.elf_machine }}' for ${{ matrix.arch }}, got '$MACHINE'."
+              exit 1
+          fi
+          echo "OK: ELF machine is '$MACHINE' as expected."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libdbgshim-${{ matrix.arch }}
+          path: out
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: binaries-publish
+      cancel-in-progress: false
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Arrange binaries by os-arch
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          for dir in artifacts/libdbgshim-*/; do
+            cp -r "$dir"* out/
+          done
+          find out -type f
+
+      - name: Commit and push to consulo/binaries
+        env:
+          CONSULO_BOT_TOKEN: ${{ secrets.CONSULO_BOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://consulo-bot:${CONSULO_BOT_TOKEN}@github.com/consulo/binaries.git" binaries-repo
+          cd binaries-repo
+          git checkout master 2>/dev/null || git checkout --orphan master
+          git config user.name "consulo Bot"
+          git config user.email "consulo.bot@gmail.com"
+          cp -r ../out/. .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update libdbgshim from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+            git push -u origin master
+          fi
