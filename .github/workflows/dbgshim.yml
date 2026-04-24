@@ -35,12 +35,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
       - name: Install build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake clang make python3 \
-            debootstrap qemu-user-static binfmt-support
+            debootstrap qemu-user-static binfmt-support \
+            debian-archive-keyring debian-ports-archive-keyring
 
       - name: Build rootfs
         if: matrix.cross
