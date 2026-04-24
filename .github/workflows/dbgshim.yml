@@ -96,6 +96,17 @@ jobs:
         run: |
           sudo ./eng/common/cross/build-rootfs.sh ${{ matrix.arch }} ${{ matrix.codename }} --skipunmount
 
+      - name: Prune src/CMakeLists to only dbgshim
+        run: |
+          # We only need libdbgshim.so. Drop SOS and tests:
+          #   - SOS re-includes shared.cmake which re-declares eventing_headers
+          #     (already created by src/shared/) -> cmake duplicate-target error.
+          #   - SOS's lldbplugin also needs lldb-dev which isn't in our sysroots.
+          #   - tests require a host runtime and aren't useful for cross builds.
+          sed -i '/add_subdirectory(SOS)/d;/add_subdirectory(tests)/d' src/CMakeLists.txt
+          echo "=== patched src/CMakeLists.txt ==="
+          cat src/CMakeLists.txt
+
       - name: Build native (host)
         if: ${{ !matrix.cross }}
         run: ./build.sh -a ${{ matrix.arch }} -configuration Release -skipmanaged
@@ -117,18 +128,30 @@ jobs:
           mkdir -p out/${{ matrix.out_dir }}
           cp "$BIN" out/${{ matrix.out_dir }}/libdbgshim.so
 
-      - name: Verify ELF architecture
+      - name: Verify libdbgshim.so
         run: |
           set -euo pipefail
           SO=out/${{ matrix.out_dir }}/libdbgshim.so
-          echo "File: $SO"
-          readelf -h "$SO" | grep -E "Class|Machine"
+          echo "=== File: $SO ==="
+          ls -la "$SO"
+          echo
+          echo "=== ELF header ==="
+          readelf -h "$SO" | grep -E "Class|Machine|Type"
           MACHINE=$(readelf -h "$SO" | awk -F: '/Machine:/ {sub(/^[ \t]+/,"",$2); print $2}')
           if [ "$MACHINE" != "${{ matrix.elf_machine }}" ]; then
               echo "::error::ELF machine mismatch. Expected '${{ matrix.elf_machine }}' for ${{ matrix.arch }}, got '$MACHINE'."
               exit 1
           fi
-          echo "OK: ELF machine is '$MACHINE' as expected."
+          echo
+          echo "=== Dynamic dependencies (NEEDED) ==="
+          readelf -d "$SO" | grep -E 'NEEDED|SONAME|RUNPATH'
+          echo
+          echo "=== Exported dbgshim symbols ==="
+          readelf --dyn-syms "$SO" | awk '$7 == "GLOBAL" || $7 == "WEAK"' | grep -E 'CreateProcessForLaunch|CloseCLREnumeration|EnumerateCLRs|RegisterForRuntimeStartup|GetStartupNotificationEvent|UnregisterForRuntimeStartup' || {
+              echo "::error::expected dbgshim exports not found in $SO"
+              exit 1
+          }
+          echo "OK: libdbgshim.so is '$MACHINE' with expected exports."
 
       - uses: actions/upload-artifact@v4
         with:
